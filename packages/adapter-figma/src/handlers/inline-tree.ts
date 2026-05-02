@@ -60,9 +60,18 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function getInlineDimensionField(p: any, axis: "H" | "V"): "width" | "height" | "length" {
+  if (p?.type === "line" && axis === "H") return "length";
+  return axis === "H" ? "width" : "height";
+}
+
+function getInlineDimension(p: any, axis: "H" | "V"): number | undefined {
+  return asNumber(p?.[getInlineDimensionField(p, axis)]);
+}
+
 function resolveEffectiveSizing(p: any, axis: "H" | "V"): string {
-  if (axis === "H") return p.layoutSizingHorizontal || (p.width !== undefined ? "FIXED" : "HUG");
-  return p.layoutSizingVertical || (p.height !== undefined ? "FIXED" : "HUG");
+  if (axis === "H") return p.layoutSizingHorizontal || (getInlineDimension(p, "H") !== undefined ? "FIXED" : "HUG");
+  return p.layoutSizingVertical || (getInlineDimension(p, "V") !== undefined ? "FIXED" : "HUG");
 }
 
 const AL_PARAMS = [
@@ -133,7 +142,7 @@ function getAxisBudget(parentRaw: any, nodes: InlineNode[], axis: "H" | "V"): Ax
 
   for (const node of nodes) {
     const sizing = node.raw[sizingField];
-    const dimension = asNumber(node.raw[dimensionField]);
+    const dimension = getInlineDimension(node.raw, axis);
 
     if (sizing === "FILL") {
       fillCount++;
@@ -176,8 +185,8 @@ function buildInlineTree(children: any[], parentCtx: ParentContext, parentPath: 
     const name = childName(child);
     const path = parentPath ? `${parentPath} > ${name}` : name;
 
-    // Leaf nodes (text, instance) have no layout mode
-    if (type === "text" || type === "instance" || type === "unknown") {
+    // Leaf nodes (text, instance, shape primitives) have no layout mode
+    if (type === "text" || type === "instance" || type === "rectangle" || type === "ellipse" || type === "line" || type === "unknown") {
       return { raw: child, type, name, path, parent: parentCtx, layoutMode: "NONE", explicitNone: false, children: [] };
     }
 
@@ -321,14 +330,14 @@ function validateInlineTree(
       {
         field: "layoutSizingHorizontal",
         role: isVertical ? "cross" : "primary",
-        dimension: raw.width,
+        dimension: getInlineDimension(raw, "H"),
         sizing: raw.layoutSizingHorizontal,
         parentSizing: parent.sizingH,
       },
       {
         field: "layoutSizingVertical",
         role: isVertical ? "primary" : "cross",
-        dimension: raw.height,
+        dimension: getInlineDimension(raw, "V"),
         sizing: raw.layoutSizingVertical,
         parentSizing: parent.sizingV,
       },
@@ -336,7 +345,8 @@ function validateInlineTree(
 
     for (const axis of axes) {
       const { field, role, dimension, sizing, parentSizing } = axis;
-      const dimName = field === "layoutSizingHorizontal" ? "width" : "height";
+      const parentDimName = field === "layoutSizingHorizontal" ? "width" : "height";
+      const childDimName = getInlineDimensionField(raw, field === "layoutSizingHorizontal" ? "H" : "V");
 
       // Level 2a: HUG parent + FILL child on the primary axis — invalid.
       // A HUG parent normally sizes from its children, but an explicit parent dimension
@@ -345,27 +355,27 @@ function validateInlineTree(
         if (role === "primary") {
           throw new Error(
             `Child '${node.name}' has ${field}:'FILL' inside parent '${parentPath}' that is HUG on the same axis. ` +
-            `A HUG parent sizes to its children, so FILL has no width/height anchor here. ` +
-            `Resolve by choosing one: parent ${field}:'FIXED' with explicit ${dimName}, parent ${field}:'FILL' within its own parent, or child ${field}:'HUG'.`
+            `A HUG parent sizes to its children, so FILL has no ${parentDimName} anchor here. ` +
+            `Resolve by choosing one: parent ${field}:'FIXED' with explicit ${parentDimName}, parent ${field}:'FILL' within its own parent, or child ${field}:'HUG'.`
           );
         }
 
         // Level 2b: Cross-axis FILL inside HUG is ambiguous but recoverable.
         inferences.push({
           path, field, from: "FILL", to: "FILL", confidence: "ambiguous",
-          reason: `Cross-axis FILL inside HUG parent — siblings determine width`,
+          reason: `Cross-axis FILL inside HUG parent — siblings determine ${parentDimName}`,
         });
         hints.push({
           type: "warn",
-          message: `Child '${node.name}' has ${field}:'FILL' on the cross-axis inside a HUG parent — FILL adopts the largest sibling size. Set ${dimName} on parent for explicit sizing.`,
+          message: `Child '${node.name}' has ${field}:'FILL' on the cross-axis inside a HUG parent — FILL adopts the largest sibling size. Set ${parentDimName} on parent for explicit sizing.`,
         });
       }
 
       // Conflict: FILL + explicit dimension
       if (sizing === "FILL" && dimension !== undefined) {
         throw new Error(
-          `Child '${node.name}' has both ${field}:'FILL' and ${dimName} — these conflict. ` +
-          `Use FILL to stretch to parent, or set ${dimName} with ${field}:'FIXED'.`
+          `Child '${node.name}' has both ${field}:'FILL' and ${childDimName} — these conflict. ` +
+          `Use FILL to stretch to parent, or set ${childDimName} with ${field}:'FIXED'.`
         );
       }
 
@@ -380,7 +390,7 @@ function validateInlineTree(
           });
           hints.push({
             type: "confirm",
-            message: `Child '${node.name}' has ${field}:'FIXED' on cross-axis without ${dimName} — using FILL to stretch to parent.`,
+            message: `Child '${node.name}' has ${field}:'FIXED' on cross-axis without ${childDimName} — using FILL to stretch to parent.`,
           });
         } else {
           raw[field] = "HUG";
@@ -390,7 +400,7 @@ function validateInlineTree(
           });
           hints.push({
             type: "confirm",
-            message: `Child '${node.name}' has ${field}:'FIXED' on primary axis without ${dimName} — using HUG to content-size.`,
+            message: `Child '${node.name}' has ${field}:'FIXED' on primary axis without ${childDimName} — using HUG to content-size.`,
           });
         }
       }

@@ -58,9 +58,11 @@ inlineChildren:
     frame: {type:"frame", name?, layoutMode?, fillVariableName?, itemSpacing?, layoutSizingHorizontal?, children?}.
     instance: {type:"instance", componentId, variantProperties?, properties?}.
     component: {type:"component", name, children?}.
+    rectangle / ellipse / line: same params as the corresponding frames(method:"create", type:"rectangle"|"ellipse"|"line") branch.
     All params from text/frame endpoints are supported on their respective types.
     Always set layoutSizingHorizontal + layoutSizingVertical on children inside auto-layout parents (FILL, HUG, or FIXED).
-    Example: children:[{type:"text", name:"Title", text:"Title", textStyleName:"Heading/Medium",
+    Example: children:[{type:"ellipse", name:"Dot", width:6, height:6, fillVariableName:"status/active"},
+    {type:"text", name:"Title", text:"Title", textStyleName:"Heading/Medium",
     fontColorVariableName:"text/primary", layoutSizingHorizontal:"FILL", layoutSizingVertical:"HUG"},
     {type:"frame", name:"Row", layoutMode:"HORIZONTAL", layoutSizingHorizontal:"FILL", layoutSizingVertical:"HUG", itemSpacing:"space/8",
     children:[{type:"instance", componentId:"1:2", layoutSizingHorizontal:"FILL", layoutSizingVertical:"HUG"}]}]
@@ -78,10 +80,12 @@ inlineChildrenComponent:
     frame: {type:"frame", name?, layoutMode?, fillVariableName?, itemSpacing?, layoutSizingHorizontal?, children?}.
     instance: {type:"instance", componentId, componentPropertyName?, variantProperties?, properties?}.
     component: {type:"component", name, children?}.
+    rectangle / ellipse / line: same params as the corresponding frames(method:"create", type:"rectangle"|"ellipse"|"line") branch.
     All params from text/frame endpoints are supported on their respective types.
     componentPropertyName auto-creates and binds a TEXT (text) or INSTANCE_SWAP (instance) property.
     Always set layoutSizingHorizontal + layoutSizingVertical on children inside auto-layout parents (FILL, HUG, or FIXED).
-    Example: children:[{type:"text", name:"Label", text:"Button", componentPropertyName:"Label",
+    Example: children:[{type:"ellipse", name:"Dot", width:6, height:6, fillVariableName:"status/active"},
+    {type:"text", name:"Label", text:"Button", componentPropertyName:"Label",
     textStyleName:"Body/Medium", fontColorVariableName:"text/primary", layoutSizingHorizontal:"FILL", layoutSizingVertical:"HUG"},
     {type:"frame", name:"Actions", layoutMode:"HORIZONTAL", layoutSizingHorizontal:"FILL", layoutSizingVertical:"HUG", itemSpacing:"space/8",
     children:[{type:"instance", componentId:"1:2", componentPropertyName:"Action", layoutSizingHorizontal:"FILL", layoutSizingVertical:"HUG"}]}]
@@ -92,7 +96,7 @@ inlineVariants:
   type: array
   coerce: json
   optional: true
-  description: 'Inline variant components. Each must be {type:"component", name, children?, ...frame_params}. All variants must share the same child structure. Alternative to componentIds — do not combine both.'
+  description: 'Inline variant components. Each must be {type:"component", name, children?, ...frame_params}. Variant children use the same inline child types as components.create, including rectangle / ellipse / line. All variants must share the same child structure. Alternative to componentIds — do not combine both.'
   items:
     type: object
 

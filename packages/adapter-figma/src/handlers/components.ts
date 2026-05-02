@@ -1,5 +1,6 @@
 import { batchHandler, appendAndApplySizing, checkOverlappingSiblings, isSmallIntrinsic, applyTokens, resolveComponentPropertyKey, normalizeAliases, TEXT_ALIAS_KEYS, type Hint } from "./helpers";
 import { setupFrameNode } from "./create-frame";
+import { createSingleRectangle, createSingleEllipse, createSingleLine } from "./create-shape";
 import { auditNode } from "./lint";
 import { validateAndFixInlineChildren, formatDiff, buildCorrectedPayload } from "./inline-tree";
 import { createStageContainer } from "./stage";
@@ -32,6 +33,17 @@ function warnUnboundText(comp: ComponentNode, hints: Hint[]) {
 // -- inline children --
 
 import { prepCreateText, createTextSingle, type CreateTextContext } from "./create-text";
+
+const INLINE_SHAPE_TYPES = new Set(["rectangle", "ellipse", "line"]);
+const INLINE_SUPPORTED_CHILD_TYPES = ["text", "frame", "instance", "component", "slot", ...INLINE_SHAPE_TYPES] as const;
+
+function formatInlineChildTypes(): string {
+  return INLINE_SUPPORTED_CHILD_TYPES.map((type, index, arr) => {
+    if (index === arr.length - 1) return `'${type}'`;
+    if (index === arr.length - 2) return `'${type}', or `;
+    return `'${type}', `;
+  }).join("");
+}
 
 /**
  * Normalize inline child types in-place before processing.
@@ -79,6 +91,7 @@ export function collectTextChildren(children: any[]): any[] {
  * Works for both components (with property binding) and plain frames (without).
  * Text children delegate to createTextSingle for full feature parity.
  * Frame children use setupFrameNode and recurse for nested trees.
+ * Shape children reuse the same helpers as top-level frames.create discriminants.
  */
 export async function createInlineChildren(
   appendTo: FrameNode | ComponentNode,
@@ -91,7 +104,7 @@ export async function createInlineChildren(
     // Type normalization (lowercase, inference, id→componentId) handled by normalizeInlineChildTypes pre-pass.
     // Catch anything that still has no type (e.g. empty object).
     if (!child.type) {
-      hints.push({ type: "error", message: `Inline child missing 'type'. Set type: "text", "frame", "instance", "component", or "slot".` });
+      hints.push({ type: "error", message: `Inline child missing 'type'. Set type: ${formatInlineChildTypes()}.` });
       continue;
     }
 
@@ -187,6 +200,17 @@ export async function createInlineChildren(
         parentId: appendTo.id,
       });
       if (result.hints) hints.push(...result.hints);
+    } else if (INLINE_SHAPE_TYPES.has(child.type)) {
+      const createShape = child.type === "rectangle"
+        ? createSingleRectangle
+        : child.type === "ellipse"
+          ? createSingleEllipse
+          : createSingleLine;
+      const result = await createShape({
+        ...child,
+        parentId: appendTo.id,
+      });
+      if (result.hints) hints.push(...result.hints);
     } else if (child.type === "slot") {
       if (!comp) {
         hints.push({ type: "error", message: `Inline slot children require a component parent. Slots can only be created inside components.` });
@@ -206,7 +230,7 @@ export async function createInlineChildren(
       const { hints: slotHints } = await setupFrameNode(slot as any, slotFrameParams);
       hints.push(...slotHints);
     } else {
-      hints.push({ type: "error", message: `Inline child type '${child.type}' not supported. Use 'text', 'frame', 'instance', 'component', or 'slot'.` });
+      hints.push({ type: "error", message: `Inline child type '${child.type}' not supported. Use ${formatInlineChildTypes()}.` });
     }
   }
 }

@@ -313,10 +313,50 @@ export function checkParentOverflow(parent: BaseNode | null, hints: Hint[]): voi
  * @param autoDefault - When true (fresh frames/shapes), auto-default cross-axis to FILL.
  *                      When false (instances/updates), only warn about sizing issues.
  */
+type LayoutSizingValue = "FIXED" | "HUG" | "FILL";
+
+function getSizingDimensionName(node: SceneNode, field: "layoutSizingHorizontal" | "layoutSizingVertical"): "width" | "height" | "length" {
+  if (node.type === "LINE" && field === "layoutSizingHorizontal") return "length";
+  return field === "layoutSizingHorizontal" ? "width" : "height";
+}
+
+function getSizingInputDimension(
+  node: SceneNode,
+  p: { width?: number; height?: number; length?: number },
+  field: "layoutSizingHorizontal" | "layoutSizingVertical",
+): number | undefined {
+  if (field === "layoutSizingHorizontal") {
+    if (node.type === "LINE") return p.length ?? ("width" in node ? (node as any).width : undefined);
+    if (p.width !== undefined) return p.width;
+    if (node.type === "RECTANGLE" || node.type === "ELLIPSE") return "width" in node ? (node as any).width : undefined;
+    return undefined;
+  }
+
+  if (p.height !== undefined) return p.height;
+  if (node.type === "RECTANGLE" || node.type === "ELLIPSE") return "height" in node ? (node as any).height : undefined;
+  return undefined;
+}
+
+function getSupportedSizingValues(
+  node: SceneNode,
+  field: "layoutSizingHorizontal" | "layoutSizingVertical",
+): LayoutSizingValue[] {
+  if (node.type === "LINE") return field === "layoutSizingHorizontal" ? ["FIXED", "FILL"] : [];
+  if (node.type === "RECTANGLE" || node.type === "ELLIPSE") return ["FIXED", "FILL"];
+  return ["FIXED", "HUG", "FILL"];
+}
+
+function formatSupportedSizingValues(values: LayoutSizingValue[]): string {
+  if (values.length === 0) return "no layout sizing values";
+  if (values.length === 1) return `'${values[0]}'`;
+  if (values.length === 2) return `'${values[0]}' or '${values[1]}'`;
+  return `${values.slice(0, -1).map(v => `'${v}'`).join(", ")}, or '${values[values.length - 1]}'`;
+}
+
 export function applySizing(
   node: SceneNode,
   parent: BaseNode | null,
-  p: { layoutSizingHorizontal?: string; layoutSizingVertical?: string; width?: number; height?: number },
+  p: { layoutSizingHorizontal?: string; layoutSizingVertical?: string; width?: number; height?: number; length?: number },
   hints: Hint[],
   autoDefault = true,
 ): void {
@@ -339,11 +379,16 @@ export function applySizing(
     explicit: string | undefined,
     dimension: number | undefined,
   ): { value: string | undefined; inferred: boolean; reason?: string } {
+    const supportedValues = getSupportedSizingValues(node, field);
+
+    // This node/axis does not participate in auto-layout sizing.
+    if (supportedValues.length === 0) return { value: undefined, inferred: false };
+
     // 1. Agent explicitly set sizing → use as-is
     if (explicit) {
       // Warn when sizing conflicts with a provided dimension
       if (dimension !== undefined && (explicit === "HUG" || explicit === "FILL")) {
-        const dim = field === "layoutSizingHorizontal" ? "width" : "height";
+        const dim = getSizingDimensionName(node, field);
         const behavior = explicit === "HUG" ? "node will shrink to content" : "node will stretch to fill parent";
         hints.push({ type: "warn", message: `${dim}: ${dimension} ignored — ${field} is "${explicit}" (${behavior}). Set ${field}: "FIXED" to use the explicit ${dim}.` });
       }
@@ -391,14 +436,15 @@ export function applySizing(
     return { value: undefined, inferred: false };
   }
 
-  const hAxis = inferAxis("layoutSizingHorizontal", p.layoutSizingHorizontal, p.width);
-  const vAxis = inferAxis("layoutSizingVertical", p.layoutSizingVertical, p.height);
+  const hAxis = inferAxis("layoutSizingHorizontal", p.layoutSizingHorizontal, getSizingInputDimension(node, p, "layoutSizingHorizontal"));
+  const vAxis = inferAxis("layoutSizingVertical", p.layoutSizingVertical, getSizingInputDimension(node, p, "layoutSizingVertical"));
   const axes: Array<{ field: "layoutSizingHorizontal" | "layoutSizingVertical"; value: string | undefined; inferred: boolean; reason?: string }> = [
     { field: "layoutSizingHorizontal", ...hAxis },
     { field: "layoutSizingVertical", ...vAxis },
   ];
 
   // ── Apply each axis with validation ────────────────────────────
+
   for (const axis of axes) {
     let { value } = axis;
     const { field, inferred, reason } = axis;
@@ -408,11 +454,49 @@ export function applySizing(
       continue;
     }
 
-    // FILL needs an AL parent — downgrade to HUG to avoid clipping at arbitrary size
+    const supportedValues = getSupportedSizingValues(node, field);
+    const dimensionName = getSizingDimensionName(node, field);
+    const dimension = getSizingInputDimension(node, p, field);
+
+    if (supportedValues.length === 0) {
+      if (p[field] !== undefined) {
+        if (node.type === "LINE") {
+          throw new Error(`${field} is not supported on LINE. Lines only support layoutSizingHorizontal with explicit length or FILL inside an auto-layout parent.`);
+        }
+        throw new Error(`${field} is not supported on ${node.type}. Use explicit ${dimensionName} instead.`);
+      }
+      continue;
+    }
+
+    if (!supportedValues.includes(value as LayoutSizingValue)) {
+      if (!inferred) {
+        throw new Error(
+          `${field}:'${value}' is not supported on ${node.type}. Use ${formatSupportedSizingValues(supportedValues)}` +
+          `${supportedValues.includes("FIXED") ? ` with explicit ${dimensionName}` : ""}` +
+          `${supportedValues.includes("FILL") && !parentIsAL ? ", or place this node inside an auto-layout parent to use FILL" : ""}.`
+        );
+      }
+
+      if (supportedValues.includes("FIXED") && dimension !== undefined) {
+        value = "FIXED";
+      } else if (supportedValues.includes("FILL") && parentIsAL) {
+        value = "FILL";
+      } else {
+        continue;
+      }
+    }
+
+    // FILL needs an AL parent — downgrade to FIXED when we have an explicit/intrinsic size,
+    // otherwise HUG for nodes that actually support it.
     if (value === "FILL" && !parentIsAL) {
       const parentDesc = parent ? `parent "${(parent as any).name || parent.id}"` : "parent";
-      hints.push({ type: "warn", message: `${field}:'FILL' requires an auto-layout parent — using HUG instead. Set ${parentDesc}'s layoutMode to enable auto-layout for FILL.` });
-      value = "HUG";
+      if (supportedValues.includes("FIXED") && dimension !== undefined) {
+        hints.push({ type: "warn", message: `${field}:'FILL' requires an auto-layout parent — using FIXED because ${dimensionName} is defined. Set ${parentDesc}'s layoutMode to enable auto-layout for FILL.` });
+        value = "FIXED";
+      } else {
+        hints.push({ type: "warn", message: `${field}:'FILL' requires an auto-layout parent — using HUG instead. Set ${parentDesc}'s layoutMode to enable auto-layout for FILL.` });
+        value = "HUG";
+      }
     }
 
     // FILL/HUG on ABSOLUTE child is a no-op — Figma ignores sizing for absolute children
@@ -430,8 +514,8 @@ export function applySizing(
           nodeIsAL = true;
           hints.push({ type: "suggest", message: `${field}:'HUG' requires auto-layout — enabled layoutMode:'VERTICAL'.` });
         } else {
-          // Text/shapes outside AL — contradictory, can't resolve
-          throw new Error(`${field}:'HUG' is not supported on ${node.type} outside auto-layout. Place this node inside an auto-layout parent (set parentId to an auto-layout frame).`);
+          // Non-container nodes only support HUG when the underlying Figma node type allows it.
+          throw new Error(`${field}:'HUG' is not supported on ${node.type}. Use explicit ${dimensionName}${supportedValues.includes("FILL") ? ", or FILL inside an auto-layout parent" : ""}.`);
         }
       }
     }
@@ -452,8 +536,7 @@ export function applySizing(
 
     // Report inferred decisions so the agent knows what we chose
     if (inferred) {
-      const dim = field === "layoutSizingHorizontal" ? "width" : "height";
-      hints.push({ type: "suggest", message: `No ${dim} specified — defaulted to ${field}:'${value}' (${reason}).` });
+      hints.push({ type: "suggest", message: `No ${dimensionName} specified — defaulted to ${field}:'${value}' (${reason}).` });
     }
   }
 
@@ -516,7 +599,7 @@ export function warnCrossAxisHug(node: SceneNode, parent: BaseNode | null, hints
  */
 export async function appendAndApplySizing(
   node: SceneNode,
-  p: { parentId?: string; layoutSizingHorizontal?: string; layoutSizingVertical?: string },
+  p: { parentId?: string; layoutSizingHorizontal?: string; layoutSizingVertical?: string; width?: number; height?: number; length?: number },
   hints: Hint[],
   autoDefault = true,
 ): Promise<BaseNode> {

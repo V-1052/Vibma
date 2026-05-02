@@ -1,4 +1,4 @@
-import { batchHandler, appendToParent, appendAndApplySizing, checkOverlappingSiblings, solidPaint, applyFillWithAutoBind, applyImageFill, applyStrokeWithAutoBind, applyCornerRadius, applyTokens, findVariableById, findColorVariableByName, type Hint } from "./helpers";
+import { batchHandler, appendToParent, appendAndApplySizing, checkOverlappingSiblings, solidPaint, applyFillWithAutoBind, applyImageFill, applyStrokeWithAutoBind, applyCornerRadius, applyTokens, findVariableById, findColorVariableByName, normalizeAliases, FRAME_ALIAS_KEYS, type Hint } from "./helpers";
 import {
   framesCreateSection, framesCreateSvg, framesCreateRectangle,
   framesCreateEllipse, framesCreateLine, framesCreateGroup,
@@ -138,7 +138,8 @@ async function createSingleSvg(p: any) {
 
 // ─── Rectangle ──────────────────────────────────────────────────
 
-async function createSingleRectangle(p: any) {
+export async function createSingleRectangle(p: any) {
+  normalizeAliases(p, FRAME_ALIAS_KEYS);
   const rect = figma.createRectangle();
   try {
     rect.x = p.x ?? 0;
@@ -167,7 +168,8 @@ async function createSingleRectangle(p: any) {
 
 // ─── Ellipse ────────────────────────────────────────────────────
 
-async function createSingleEllipse(p: any) {
+export async function createSingleEllipse(p: any) {
+  normalizeAliases(p, FRAME_ALIAS_KEYS);
   const ellipse = figma.createEllipse();
   try {
     ellipse.x = p.x ?? 0;
@@ -195,7 +197,8 @@ async function createSingleEllipse(p: any) {
 
 // ─── Line ───────────────────────────────────────────────────────
 
-async function createSingleLine(p: any) {
+export async function createSingleLine(p: any) {
+  normalizeAliases(p, FRAME_ALIAS_KEYS);
   const line = figma.createLine();
   try {
     line.x = p.x ?? 0;
