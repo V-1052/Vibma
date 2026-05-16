@@ -1,5 +1,6 @@
 import { batchHandler, coerceColor, findColorVariableByName, suggestStyleForColor, type Hint } from "./helpers";
 import { resolveFontAsync, clearFontCache } from "./create-text";
+import { coercePaints, serializeBoundVariables, serializePaint } from "../utils/paint";
 import { createDispatcher, paginate, pickFields } from "@ufira/vibma/endpoint";
 import type { ListResponse } from "@ufira/vibma/endpoint";
 import {
@@ -9,23 +10,27 @@ import {
 
 // ─── TypeScript Types ────────────────────────────────────────────
 
-interface PaintStyleItem  { name: string; color: { r: number; g: number; b: number; a?: number } }
+interface PaintStyleItem  { name: string; color?: { r: number; g: number; b: number; a?: number }; colorVariableName?: string; paints?: any[]; description?: string }
 interface TextStyleItem   { name: string; fontFamily: string; fontStyle?: string; fontSize: number; lineHeight?: any; letterSpacing?: any; textCase?: string; textDecoration?: string }
 interface EffectStyleItem  { name: string; effects: any[] }
-interface PatchPaintItem  { id: string; name?: string; color?: { r: number; g: number; b: number; a?: number } }
+interface GridStyleItem    { name: string; layoutGrids: any[]; description?: string }
+interface PatchPaintItem  { id: string; name?: string; description?: string; color?: { r: number; g: number; b: number; a?: number }; colorVariableName?: string; paints?: any[] }
 interface PatchTextItem   { id: string; name?: string; fontFamily?: string; fontStyle?: string; fontSize?: number; lineHeight?: any; letterSpacing?: any; textCase?: string; textDecoration?: string }
 interface PatchEffectItem  { id: string; name?: string; effects?: any[] }
-interface PatchAnyItem    { id: string; name?: string; color?: any; fontFamily?: string; fontStyle?: string; fontSize?: number; lineHeight?: any; letterSpacing?: any; textCase?: string; textDecoration?: string; effects?: any[] }
+interface PatchGridItem    { id: string; name?: string; description?: string; layoutGrids?: any[] }
+interface PatchAnyItem    { id: string; name?: string; description?: string; color?: any; colorVariableName?: string; paints?: any[]; fontFamily?: string; fontStyle?: string; fontSize?: number; lineHeight?: any; letterSpacing?: any; textCase?: string; textDecoration?: string; effects?: any[]; layoutGrids?: any[] }
 
 type StyleParams =
   | { method: "create"; type: "paint";  items: PaintStyleItem[];  depth?: number }
   | { method: "create"; type: "text";   items: TextStyleItem[];   depth?: number }
   | { method: "create"; type: "effect"; items: EffectStyleItem[]; depth?: number }
+  | { method: "create"; type: "grid";   items: GridStyleItem[];   depth?: number }
   | { method: "get";    id: string; fields?: string[] }
-  | { method: "list";   type?: "paint" | "text" | "effect"; fields?: string[]; offset?: number; limit?: number }
+  | { method: "list";   type?: "paint" | "text" | "effect" | "grid"; fields?: string[]; offset?: number; limit?: number }
   | { method: "update"; type: "paint";  items: PatchPaintItem[] }
   | { method: "update"; type: "text";   items: PatchTextItem[] }
   | { method: "update"; type: "effect"; items: PatchEffectItem[] }
+  | { method: "update"; type: "grid";   items: PatchGridItem[] }
   | { method: "update"; items: PatchAnyItem[] }   // type omitted -- permissive
   | { method: "delete"; id?: string; items?: Array<{ id: string }> };
 
@@ -50,35 +55,35 @@ function rgbaToHex(color: any): string {
   return `#${[r, g, b, a].map(x => x.toString(16).padStart(2, "0")).join("")}`;
 }
 
+function collectVariableAliasIds(value: any): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(collectVariableAliasIds);
+  if (typeof value === "object") {
+    if (typeof value.id === "string" && (value.type === undefined || value.type === "VARIABLE_ALIAS")) return [value.id];
+    return Object.values(value).flatMap(collectVariableAliasIds);
+  }
+  return [];
+}
+
 /** Serialize a Figma BaseStyle to a plain object. Shared by get and list. */
 function serializeStyle(style: BaseStyle): Record<string, any> {
   const r: any = { id: style.id, name: style.name, type: style.type };
   if (style.description) r.description = style.description;
   if (style.type === "PAINT") {
     const ps = style as PaintStyle;
-    r.paints = ps.paints.map((p: any) => {
-      const paint: any = { type: p.type };
-      if (p.visible !== undefined) paint.visible = p.visible;
-      if (p.opacity !== undefined) paint.opacity = p.opacity;
-      if (p.blendMode) paint.blendMode = p.blendMode;
-      if (p.color) paint.color = rgbaToHex({ ...p.color, a: p.opacity ?? 1 });
-      return paint;
-    });
-    // Expose bound variable name on the paint style
-    const bv = (ps as any).boundVariables;
-    if (bv) {
-      for (const [, val] of Object.entries(bv)) {
-        if (Array.isArray(val)) {
-          for (const v of val) {
-            if (v?.id) {
-              try {
-                const resolved = figma.variables.getVariableById(v.id);
-                if (resolved) r.colorVariableName = resolved.name;
-              } catch {}
-            }
-          }
-        }
-      }
+    r.paints = ps.paints.map(serializePaint);
+
+    const boundVariables = serializeBoundVariables((ps as any).boundVariables);
+    if (boundVariables) r.boundVariables = boundVariables;
+
+    // Backward-compatible convenience: expose the first local color variable name if present.
+    const aliasIds = collectVariableAliasIds((ps as any).boundVariables);
+    for (const paint of ps.paints as any[]) aliasIds.push(...collectVariableAliasIds(paint.boundVariables));
+    for (const id of aliasIds) {
+      try {
+        const resolved = figma.variables.getVariableById(id);
+        if (resolved) { r.colorVariableName = resolved.name; break; }
+      } catch {}
     }
   } else if (style.type === "TEXT") {
     const ts = style as TextStyle;
@@ -147,6 +152,25 @@ async function removeStyleSingle(p: any) {
 }
 
 async function createPaintStyleSingle(p: any) {
+  const hasPaints = p.paints !== undefined;
+  if (hasPaints && (p.color !== undefined || p.colorVariableName !== undefined)) {
+    throw new Error(`Paint style "${p.name}" cannot combine paints with color/colorVariableName. Use paints for full PaintStyle.paints, or color/colorVariableName for the single-solid shorthand.`);
+  }
+
+  if (hasPaints) {
+    const paints = coercePaints(p.paints, undefined, { path: "paints", help: 'styles(method:"help", topic:"create")' });
+    const style = figma.createPaintStyle();
+    try {
+      style.name = p.name;
+      if (p.description) style.description = p.description;
+      style.paints = paints;
+      return { id: style.id };
+    } catch (e) {
+      style.remove();
+      throw e;
+    }
+  }
+
   // Resolve color: explicit color, or from variable, or error
   let c = p.color ? coerceColor(p.color) : null;
   let resolvedVariable: Variable | null = null;
@@ -172,7 +196,7 @@ async function createPaintStyleSingle(p: any) {
     }
   }
 
-  if (!c) throw new Error(`Paint style "${p.name}" requires either color or colorVariableName.`);
+  if (!c) throw new Error(`Paint style "${p.name}" requires paints, color, or colorVariableName.`);
 
   const style = figma.createPaintStyle();
   try {
@@ -263,29 +287,54 @@ async function createEffectStyleSingle(p: any) {
 }
 
 /** Validate and coerce LayoutGrid objects to match Figma API shape. */
-function mapLayoutGrids(grids: any[]): any[] {
+function mapLayoutGrids(grids: any[], help = 'styles(method:"help", topic:"create")'): any[] {
+  if (!Array.isArray(grids)) {
+    throw new Error(`layoutGrids must be an array of LayoutGrid objects. See ${help}.`);
+  }
+
   return grids.map((g: any, i: number) => {
-    if (!g.pattern) throw new Error(`layoutGrids[${i}]: "pattern" is required (ROWS, COLUMNS, or GRID)`);
-    const grid: any = { pattern: g.pattern, visible: g.visible ?? true };
+    if (!g || typeof g !== "object" || Array.isArray(g)) {
+      throw new Error(`layoutGrids[${i}] must be an object. See ${help}.`);
+    }
+
+    const pattern = g.pattern;
+    const validPatterns = ["ROWS", "COLUMNS", "GRID"];
+    if (!pattern) throw new Error(`layoutGrids[${i}]: "pattern" is required (ROWS, COLUMNS, or GRID). See ${help}.`);
+    if (!validPatterns.includes(pattern)) {
+      throw new Error(`layoutGrids[${i}]: invalid pattern "${pattern}". Use ROWS, COLUMNS, or GRID. See ${help}.`);
+    }
+
+    const grid: any = { pattern, visible: g.visible ?? true };
 
     // Color: coerce hex string → RGBA object
-    if (g.color) {
+    if (g.color !== undefined) {
       const c = coerceColor(g.color);
       if (c) grid.color = { r: c.r, g: c.g, b: c.b, a: c.a };
-      else throw new Error(`layoutGrids[${i}]: invalid color "${g.color}"`);
+      else throw new Error(`layoutGrids[${i}]: invalid color "${g.color}". Use hex or {r,g,b,a}. See ${help}.`);
     } else {
       grid.color = { r: 1, g: 0, b: 0, a: 0.1 }; // Figma default: red 10%
     }
 
-    if (g.pattern === "GRID") {
-      grid.sectionSize = g.sectionSize ?? 10;
+    if (pattern === "GRID") {
+      const extras = ["alignment", "gutterSize", "count", "offset"].filter(key => g[key] !== undefined);
+      if (extras.length > 0) {
+        throw new Error(`layoutGrids[${i}]: pattern:"GRID" only supports sectionSize, visible, and color; remove ${extras.join(", ")}. Use ROWS/COLUMNS for alignment, count, gutters, and offsets. See ${help}.`);
+      }
+      if (g.sectionSize === undefined) {
+        throw new Error(`layoutGrids[${i}]: sectionSize is required for pattern:"GRID". Example: {pattern:"GRID", sectionSize:8}. See ${help}.`);
+      }
+      grid.sectionSize = g.sectionSize;
     } else {
       // ROWS / COLUMNS
       const validAlignments = ["MIN", "MAX", "STRETCH", "CENTER"];
-      if (g.alignment && !validAlignments.includes(g.alignment)) {
-        throw new Error(`layoutGrids[${i}]: invalid alignment "${g.alignment}". Use: ${validAlignments.join(", ")}`);
+      const alignment = g.alignment || "STRETCH";
+      if (!validAlignments.includes(alignment)) {
+        throw new Error(`layoutGrids[${i}]: invalid alignment "${alignment}". Use: ${validAlignments.join(", ")}. See ${help}.`);
       }
-      grid.alignment = g.alignment || "STRETCH";
+      if (alignment === "STRETCH" && g.sectionSize !== undefined) {
+        throw new Error(`layoutGrids[${i}]: sectionSize is invalid with alignment:"STRETCH" because Figma computes stretched row/column sizes. Omit sectionSize, or use alignment:"MIN"|"MAX"|"CENTER" for fixed-size rows/columns. See ${help}.`);
+      }
+      grid.alignment = alignment;
       grid.gutterSize = g.gutterSize ?? 20;
       grid.count = g.count ?? 12;
       if (g.sectionSize !== undefined) grid.sectionSize = g.sectionSize;
@@ -296,7 +345,7 @@ function mapLayoutGrids(grids: any[]): any[] {
 }
 
 async function createGridStyleSingle(p: any) {
-  const grids = mapLayoutGrids(p.layoutGrids);
+  const grids = mapLayoutGrids(p.layoutGrids, 'styles(method:"help", topic:"create")');
   const style = figma.createGridStyle();
   try {
     style.name = p.name;
@@ -348,7 +397,7 @@ async function resolveAnyStyle(idOrName: string): Promise<BaseStyle> {
 // ─── Patch Styles Handler ────────────────────────────────────────
 
 // Fields applicable to each style type (excluding shared fields: id, name)
-const PAINT_FIELDS = ["color", "colorVariableName"];
+const PAINT_FIELDS = ["paints", "color", "colorVariableName"];
 const TEXT_FIELDS = ["fontFamily", "fontStyle", "fontSize", "lineHeight", "letterSpacing", "textCase", "textDecoration", "paragraphIndent", "paragraphSpacing", "leadingTrim"];
 const EFFECT_FIELDS = ["effects"];
 const GRID_FIELDS = ["layoutGrids"];
@@ -368,7 +417,12 @@ async function patchStyleSingle(p: any) {
 
   if (style.type === "PAINT") {
     const ps = style as PaintStyle;
-    if (p.color !== undefined || p.colorVariableName !== undefined) {
+    if (p.paints !== undefined) {
+      if (p.color !== undefined || p.colorVariableName !== undefined) {
+        throw new Error(`Paint style "${style.name}" cannot combine paints with color/colorVariableName. Use paints to replace PaintStyle.paints, or color/colorVariableName for the single-solid shorthand.`);
+      }
+      ps.paints = coercePaints(p.paints, undefined, { path: "paints", help: 'styles(method:"help", topic:"update")' });
+    } else if (p.color !== undefined || p.colorVariableName !== undefined) {
       const c = p.color ? coerceColor(p.color) : null;
       ps.paints = [{ type: "SOLID", color: c ? { r: c.r, g: c.g, b: c.b } : (ps.paints[0] as SolidPaint)?.color ?? { r: 0, g: 0, b: 0 }, opacity: c?.a ?? 1 }];
       if (p.colorVariableName) {
@@ -420,7 +474,7 @@ async function patchStyleSingle(p: any) {
     }
   } else if (style.type === "GRID") {
     const gs = style as GridStyle;
-    if (p.layoutGrids !== undefined) gs.layoutGrids = p.layoutGrids;
+    if (p.layoutGrids !== undefined) gs.layoutGrids = mapLayoutGrids(p.layoutGrids, 'styles(method:"help", topic:"update")');
   }
 
   // Collect warnings

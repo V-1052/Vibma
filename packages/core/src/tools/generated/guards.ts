@@ -674,7 +674,7 @@ export const prototypingAdd = new Set([
 ]) as ReadonlySet<string>;
 
 /** styles create type="paint" */
-export const stylesCreatePaint = new Set(["color","colorVariableName","description","name"]) as ReadonlySet<string>;
+export const stylesCreatePaint = new Set(["color","colorVariableName","description","name","paints"]) as ReadonlySet<string>;
 
 /** styles create type="text" */
 export const stylesCreateText = new Set([
@@ -713,6 +713,7 @@ export const stylesUpdate = new Set([
   "letterSpacing",
   "lineHeight",
   "name",
+  "paints",
   "paragraphIndent",
   "paragraphSpacing",
   "textCase",
