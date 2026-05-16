@@ -16,3 +16,4 @@ docs/dist/
 docs/.astro/
 docs/node_modules/
 .vibma/pipeline-runs/
+graphify-out/
