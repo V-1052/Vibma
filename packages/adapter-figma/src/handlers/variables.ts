@@ -18,6 +18,8 @@ const VALID_SCOPES = new Set([
   "TRANSFORM",
 ]);
 
+const CODE_SYNTAX_PLATFORMS = ["WEB", "ANDROID", "iOS"] as const;
+
 function applyScopes(variable: any, scopes: string[], hints: Hint[]): void {
   const invalid = scopes.filter((s: string) => !VALID_SCOPES.has(s));
   if (invalid.length > 0) {
@@ -30,6 +32,48 @@ function applyScopes(variable: any, scopes: string[], hints: Hint[]): void {
   }
   try { variable.scopes = scopes; }
   catch (e: any) { hints.push({ type: "error", message: `in set_scopes: ${e.message}` }); }
+}
+
+function serializeCodeSyntax(variable: any): Record<string, string> | undefined {
+  const codeSyntax = variable.codeSyntax;
+  if (!codeSyntax || typeof codeSyntax !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const platform of CODE_SYNTAX_PLATFORMS) {
+    const value = codeSyntax[platform];
+    if (typeof value === "string" && value.length > 0) out[platform] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function applyCodeSyntax(variable: any, codeSyntax: Record<string, unknown> | undefined, hints: Hint[]): void {
+  if (codeSyntax === undefined) return;
+  if (!codeSyntax || typeof codeSyntax !== "object" || Array.isArray(codeSyntax)) {
+    hints.push({ type: "error", message: `codeSyntax must be an object with optional WEB, ANDROID, and iOS string values.` });
+    return;
+  }
+
+  const invalid = Object.keys(codeSyntax).filter(k => !CODE_SYNTAX_PLATFORMS.includes(k as any));
+  if (invalid.length > 0) {
+    hints.push({
+      type: "warn",
+      message: `Invalid codeSyntax platform(s): [${invalid.join(", ")}] — ignored. Valid: [${CODE_SYNTAX_PLATFORMS.join(", ")}].`,
+    });
+  }
+
+  for (const platform of CODE_SYNTAX_PLATFORMS) {
+    const value = codeSyntax[platform];
+    if (value === undefined) continue;
+    if (typeof value !== "string") {
+      hints.push({ type: "error", message: `codeSyntax.${platform} must be a string.` });
+      continue;
+    }
+    try {
+      if (value === "") variable.removeVariableCodeSyntax(platform);
+      else variable.setVariableCodeSyntax(platform, value);
+    } catch (e: any) {
+      hints.push({ type: "error", message: `Failed to set codeSyntax.${platform} on "${variable.name}": ${e.message}` });
+    }
+  }
 }
 
 // ─── Figma Handlers ──────────────────────────────────────────────
@@ -100,6 +144,8 @@ async function serializeVariable(v: any): Promise<Record<string, any>> {
     valuesByMode, scopes: v.scopes,
   };
   if (v.description) result.description = v.description;
+  const codeSyntax = serializeCodeSyntax(v);
+  if (codeSyntax) result.codeSyntax = codeSyntax;
   return result;
 }
 
@@ -172,6 +218,7 @@ async function createCollectionSingle(p: any) {
       }
 
       if (vDef.description !== undefined) refetched.description = vDef.description;
+      applyCodeSyntax(refetched, vDef.codeSyntax, hints);
 
       // Set values: valuesByMode takes precedence, value applies to ALL modes on create
       const valuesToSet: Record<string, any> = {};
@@ -296,6 +343,7 @@ async function createVariableSingle(p: any, collection: any) {
   if (p.description !== undefined) variable.description = p.description;
 
   const hints: Hint[] = [];
+  applyCodeSyntax(variable, p.codeSyntax, hints);
 
   // Set values: valuesByMode takes precedence, value applies to ALL modes on create
   const valuesToSet: Record<string, any> = {};
@@ -400,7 +448,7 @@ async function listVariablesFigma(params: any) {
   const items: any[] = [];
   for (const v of paged.items) {
     const full = await serializeVariable(v);
-    items.push(!fields?.length ? pickFields(full, ["valuesByMode", "scopes", "description"]) : pickFields(full, fields));
+    items.push(!fields?.length ? pickFields(full, ["valuesByMode", "scopes", "description", "codeSyntax"]) : pickFields(full, fields));
   }
   return { ...paged, items };
 }
@@ -414,6 +462,7 @@ async function updateVariableSingle(p: any, collection: any) {
   if (p.rename !== undefined) variable.name = p.rename;
   if (p.description !== undefined) variable.description = p.description;
   if (p.scopes !== undefined) applyScopes(variable, p.scopes, hints);
+  applyCodeSyntax(variable, p.codeSyntax, hints);
 
   // Set values: valuesByMode takes precedence, value is shorthand for default mode
   const valuesToSet: Record<string, any> = {};
