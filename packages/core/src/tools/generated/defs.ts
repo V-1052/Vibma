@@ -1322,7 +1322,7 @@ export const tools: ToolDef[] = [
             WEB: z.string().optional(),
             ANDROID: z.string().optional(),
             iOS: z.string().optional(),
-          }).optional().describe("Platform code syntax values for developer handoff, e.g. {\"WEB\":\"--color-bg\", \"ANDROID\":\"color.bg\", \"iOS\":\"Color.bg\"}"),
+          }).passthrough().optional().describe("Platform code syntax values for developer handoff, e.g. {\"WEB\":\"--color-bg\", \"ANDROID\":\"color.bg\", \"iOS\":\"Color.bg\"}"),
         }).passthrough();
         try { params.items = z.array(itemSchema).parse(params.items); }
         catch (e) { if (e instanceof z.ZodError) { throw new Error(e.issues.map(i => { const path = i.path.join("."); const shape = itemSchema instanceof z.ZodObject ? (itemSchema as any).shape : null; const field = String(i.path[1] ?? i.path[0] ?? ""); const desc = shape?.[field]?.description; const paintField = field === "paints" || field === "fills" || field === "strokes"; const paintHelp = paintField ? " Invalid Paint[] payload. Supported Paint[] authoring types: SOLID, GRADIENT_LINEAR, GRADIENT_RADIAL, GRADIENT_ANGULAR, GRADIENT_DIAMOND. Use gradientTransform + gradientStops; do not use CSS gradients or REST gradientHandlePositions. IMAGE/VIDEO/PATTERN are readback-only metadata, not Paint[] authoring input; use imageUrl/images for images. For examples call " + "variables(method:\"help\", topic:\"create\")" + "." : ""; return path + ": " + i.message + (desc ? " (expected: " + desc + ")" : "") + paintHelp; }).join("; ")); } throw e; }
@@ -1339,7 +1339,7 @@ export const tools: ToolDef[] = [
             WEB: z.string().optional(),
             ANDROID: z.string().optional(),
             iOS: z.string().optional(),
-          }).optional().describe("Update platform code syntax values, e.g. {\"WEB\":\"--color-bg\"}. Pass an empty string to clear a platform."),
+          }).passthrough().optional().describe("Update platform code syntax values, e.g. {\"WEB\":\"--color-bg\"}. Pass an empty string to clear a platform."),
         }).passthrough();
         try { params.items = z.array(itemSchema).parse(params.items); }
         catch (e) { if (e instanceof z.ZodError) { throw new Error(e.issues.map(i => { const path = i.path.join("."); const shape = itemSchema instanceof z.ZodObject ? (itemSchema as any).shape : null; const field = String(i.path[1] ?? i.path[0] ?? ""); const desc = shape?.[field]?.description; const paintField = field === "paints" || field === "fills" || field === "strokes"; const paintHelp = paintField ? " Invalid Paint[] payload. Supported Paint[] authoring types: SOLID, GRADIENT_LINEAR, GRADIENT_RADIAL, GRADIENT_ANGULAR, GRADIENT_DIAMOND. Use gradientTransform + gradientStops; do not use CSS gradients or REST gradientHandlePositions. IMAGE/VIDEO/PATTERN are readback-only metadata, not Paint[] authoring input; use imageUrl/images for images. For examples call " + "variables(method:\"help\", topic:\"update\")" + "." : ""; return path + ": " + i.message + (desc ? " (expected: " + desc + ")" : "") + paintHelp; }).join("; ")); } throw e; }

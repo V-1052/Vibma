@@ -136,6 +136,7 @@ methods:
               type: object
               coerce: json
               optional: true
+              passthrough: true
               description: 'Platform code syntax values for developer handoff, e.g. {"WEB":"--color-bg", "ANDROID":"color.bg", "iOS":"Color.bg"}'
               properties:
                 WEB: { type: string, optional: true }
@@ -179,6 +180,7 @@ methods:
               type: object
               coerce: json
               optional: true
+              passthrough: true
               description: 'Update platform code syntax values, e.g. {"WEB":"--color-bg"}. Pass an empty string to clear a platform.'
               properties:
                 WEB: { type: string, optional: true }

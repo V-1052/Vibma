@@ -119,6 +119,7 @@ methods:
                     type: object
                     coerce: json
                     optional: true
+                    passthrough: true
                     description: 'Platform code syntax values, e.g. {"WEB":"--color-bg", "ANDROID":"color.bg", "iOS":"Color.bg"}'
                     properties:
                       WEB: { type: string, optional: true }

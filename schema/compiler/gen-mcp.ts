@@ -59,6 +59,7 @@ function paramToZod(name: string, param: RawParam, indent = 2): string {
         props.push(`${pad}  ${k}: ${paramToZod(k, v, indent + 2).trim()},`);
       }
       zod = `z.object({\n${props.join("\n")}\n${pad}})`;
+      if (param.passthrough) zod += ".passthrough()";
     } else {
       zod = "z.record(z.string(), z.unknown())";
     }

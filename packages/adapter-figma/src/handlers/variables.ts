@@ -19,6 +19,12 @@ const VALID_SCOPES = new Set([
 ]);
 
 const CODE_SYNTAX_PLATFORMS = ["WEB", "ANDROID", "iOS"] as const;
+type CodeSyntaxPlatform = typeof CODE_SYNTAX_PLATFORMS[number];
+
+/** Map any-cased platform key → canonical Figma platform (ios/IOS → iOS, web → WEB). */
+const CODE_SYNTAX_CANONICAL: Record<string, CodeSyntaxPlatform> = {
+  WEB: "WEB", ANDROID: "ANDROID", IOS: "iOS",
+};
 
 function applyScopes(variable: any, scopes: string[], hints: Hint[]): void {
   const invalid = scopes.filter((s: string) => !VALID_SCOPES.has(s));
@@ -36,7 +42,7 @@ function applyScopes(variable: any, scopes: string[], hints: Hint[]): void {
 
 function serializeCodeSyntax(variable: any): Record<string, string> | undefined {
   const codeSyntax = variable.codeSyntax;
-  if (!codeSyntax || typeof codeSyntax !== "object") return undefined;
+  if (!codeSyntax || typeof codeSyntax !== "object" || Array.isArray(codeSyntax)) return undefined;
   const out: Record<string, string> = {};
   for (const platform of CODE_SYNTAX_PLATFORMS) {
     const value = codeSyntax[platform];
@@ -52,16 +58,32 @@ function applyCodeSyntax(variable: any, codeSyntax: Record<string, unknown> | un
     return;
   }
 
-  const invalid = Object.keys(codeSyntax).filter(k => !CODE_SYNTAX_PLATFORMS.includes(k as any));
-  if (invalid.length > 0) {
+  // Normalize platform keys case-insensitively, collecting casing fixes and genuinely-unknown keys.
+  const normalized: Record<string, unknown> = {};
+  const corrected: string[] = [];
+  const unknown: string[] = [];
+  for (const [key, value] of Object.entries(codeSyntax)) {
+    const canonical = CODE_SYNTAX_CANONICAL[key.toUpperCase()];
+    if (!canonical) { unknown.push(key); continue; }
+    if (key !== canonical) corrected.push(`${key} → ${canonical}`);
+    normalized[canonical] = value; // last casing wins on duplicates
+  }
+
+  if (corrected.length > 0) {
     hints.push({
       type: "warn",
-      message: `Invalid codeSyntax platform(s): [${invalid.join(", ")}] — ignored. Valid: [${CODE_SYNTAX_PLATFORMS.join(", ")}].`,
+      message: `codeSyntax platform casing normalized: [${corrected.join(", ")}]. Canonical platforms: [${CODE_SYNTAX_PLATFORMS.join(", ")}].`,
+    });
+  }
+  if (unknown.length > 0) {
+    hints.push({
+      type: "warn",
+      message: `Invalid codeSyntax platform(s): [${unknown.join(", ")}] — ignored. Valid: [${CODE_SYNTAX_PLATFORMS.join(", ")}].`,
     });
   }
 
   for (const platform of CODE_SYNTAX_PLATFORMS) {
-    const value = codeSyntax[platform];
+    const value = normalized[platform];
     if (value === undefined) continue;
     if (typeof value !== "string") {
       hints.push({ type: "error", message: `codeSyntax.${platform} must be a string.` });
