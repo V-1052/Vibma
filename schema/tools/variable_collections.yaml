@@ -10,6 +10,7 @@ notes: |
   // valuesByMode: values keyed by mode name, e.g. {"Light": "#FFF", "Dark": "#111"}.
   // Aliases in variable values use {type: "VARIABLE_ALIAS", name: "other/variable"}.
   // Paint[] VariableAlias uses {type:"VARIABLE_ALIAS", id:"<VariableID>"}; variable_collections.get includes each variable id. Prefer *VariableName helpers when available.
+  // codeSyntax maps variable platform names to code references, e.g. {WEB:"--color-bg", ANDROID:"color.bg", iOS:"Color.bg"}.
   // scopes: see variables endpoint for full list.
   // Deleting a collection deletes all variables inside it.
   // The default mode cannot be removed. Use add_mode/remove_mode for additional modes.
@@ -68,6 +69,14 @@ methods:
                 description: "Values keyed by mode name"
               scopes: { type: "string[]", optional: true }
               description: { type: string, optional: true }
+              codeSyntax:
+                type: object
+                optional: true
+                description: "Platform code syntax values"
+                properties:
+                  WEB: { type: string, optional: true }
+                  ANDROID: { type: string, optional: true }
+                  iOS: { type: string, optional: true }
 
   create:
     tier: create
@@ -106,6 +115,16 @@ methods:
                     description: 'Values keyed by mode name (e.g. {"Light": "#FFF", "Dark": "#111"})'
                   description: { type: string, optional: true }
                   scopes: { type: "string[]", coerce: json, optional: true, description: "Restrict where variable can be applied (default: ALL_SCOPES)" }
+                  codeSyntax:
+                    type: object
+                    coerce: json
+                    optional: true
+                    passthrough: true
+                    description: 'Platform code syntax values, e.g. {"WEB":"--color-bg", "ANDROID":"color.bg", "iOS":"Color.bg"}'
+                    properties:
+                      WEB: { type: string, optional: true }
+                      ANDROID: { type: string, optional: true }
+                      iOS: { type: string, optional: true }
     response:
       type: batch
       item: { id: { type: string } }

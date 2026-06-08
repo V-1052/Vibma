@@ -777,10 +777,26 @@ export const variableCollectionsRenameMode = new Set(["collectionId","modeId","n
 export const variableCollectionsRemoveMode = new Set(["collectionId","modeId"]) as ReadonlySet<string>;
 
 /** variables.create item params */
-export const variablesCreate = new Set(["description","name","scopes","type","value","valuesByMode"]) as ReadonlySet<string>;
+export const variablesCreate = new Set([
+  "codeSyntax",
+  "description",
+  "name",
+  "scopes",
+  "type",
+  "value",
+  "valuesByMode",
+]) as ReadonlySet<string>;
 
 /** variables.update item params */
-export const variablesUpdate = new Set(["description","name","rename","scopes","value","valuesByMode"]) as ReadonlySet<string>;
+export const variablesUpdate = new Set([
+  "codeSyntax",
+  "description",
+  "name",
+  "rename",
+  "scopes",
+  "value",
+  "valuesByMode",
+]) as ReadonlySet<string>;
 
 /** variables.delete item params */
 export const variablesDelete = new Set(["name"]) as ReadonlySet<string>;

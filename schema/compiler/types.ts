@@ -18,6 +18,8 @@ export interface RawParam {
   tsType?: string;
   /** Accept alternate param names — preprocessed to canonical name before validation */
   aliases?: string[];
+  /** For object params: let unknown keys reach the handler instead of being stripped by Zod */
+  passthrough?: boolean;
 }
 
 export interface RawResponse {

@@ -18,6 +18,14 @@ const VALID_SCOPES = new Set([
   "TRANSFORM",
 ]);
 
+const CODE_SYNTAX_PLATFORMS = ["WEB", "ANDROID", "iOS"] as const;
+type CodeSyntaxPlatform = typeof CODE_SYNTAX_PLATFORMS[number];
+
+/** Map any-cased platform key → canonical Figma platform (ios/IOS → iOS, web → WEB). */
+const CODE_SYNTAX_CANONICAL: Record<string, CodeSyntaxPlatform> = {
+  WEB: "WEB", ANDROID: "ANDROID", IOS: "iOS",
+};
+
 function applyScopes(variable: any, scopes: string[], hints: Hint[]): void {
   const invalid = scopes.filter((s: string) => !VALID_SCOPES.has(s));
   if (invalid.length > 0) {
@@ -30,6 +38,64 @@ function applyScopes(variable: any, scopes: string[], hints: Hint[]): void {
   }
   try { variable.scopes = scopes; }
   catch (e: any) { hints.push({ type: "error", message: `in set_scopes: ${e.message}` }); }
+}
+
+function serializeCodeSyntax(variable: any): Record<string, string> | undefined {
+  const codeSyntax = variable.codeSyntax;
+  if (!codeSyntax || typeof codeSyntax !== "object" || Array.isArray(codeSyntax)) return undefined;
+  const out: Record<string, string> = {};
+  for (const platform of CODE_SYNTAX_PLATFORMS) {
+    const value = codeSyntax[platform];
+    if (typeof value === "string" && value.length > 0) out[platform] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function applyCodeSyntax(variable: any, codeSyntax: Record<string, unknown> | undefined, hints: Hint[]): void {
+  if (codeSyntax === undefined) return;
+  if (!codeSyntax || typeof codeSyntax !== "object" || Array.isArray(codeSyntax)) {
+    hints.push({ type: "error", message: `codeSyntax must be an object with optional WEB, ANDROID, and iOS string values.` });
+    return;
+  }
+
+  // Normalize platform keys case-insensitively, collecting casing fixes and genuinely-unknown keys.
+  const normalized: Record<string, unknown> = {};
+  const corrected: string[] = [];
+  const unknown: string[] = [];
+  for (const [key, value] of Object.entries(codeSyntax)) {
+    const canonical = CODE_SYNTAX_CANONICAL[key.toUpperCase()];
+    if (!canonical) { unknown.push(key); continue; }
+    if (key !== canonical) corrected.push(`${key} → ${canonical}`);
+    normalized[canonical] = value; // last casing wins on duplicates
+  }
+
+  if (corrected.length > 0) {
+    hints.push({
+      type: "warn",
+      message: `codeSyntax platform casing normalized: [${corrected.join(", ")}]. Canonical platforms: [${CODE_SYNTAX_PLATFORMS.join(", ")}].`,
+    });
+  }
+  if (unknown.length > 0) {
+    hints.push({
+      type: "warn",
+      message: `Invalid codeSyntax platform(s): [${unknown.join(", ")}] — ignored. Valid: [${CODE_SYNTAX_PLATFORMS.join(", ")}].`,
+    });
+  }
+
+  for (const platform of CODE_SYNTAX_PLATFORMS) {
+    const value = normalized[platform];
+    if (value === undefined) continue;
+    if (typeof value !== "string") {
+      hints.push({ type: "error", message: `codeSyntax.${platform} must be a string.` });
+      continue;
+    }
+    try {
+      if (value === "") variable.removeVariableCodeSyntax(platform);
+      else variable.setVariableCodeSyntax(platform, value);
+    } catch (e: any) {
+      hints.push({ type: "error", message: `Failed to set codeSyntax.${platform} on "${variable.name}": ${e.message}` });
+    }
+  }
 }
 
 // ─── Figma Handlers ──────────────────────────────────────────────
@@ -100,6 +166,8 @@ async function serializeVariable(v: any): Promise<Record<string, any>> {
     valuesByMode, scopes: v.scopes,
   };
   if (v.description) result.description = v.description;
+  const codeSyntax = serializeCodeSyntax(v);
+  if (codeSyntax) result.codeSyntax = codeSyntax;
   return result;
 }
 
@@ -172,6 +240,7 @@ async function createCollectionSingle(p: any) {
       }
 
       if (vDef.description !== undefined) refetched.description = vDef.description;
+      applyCodeSyntax(refetched, vDef.codeSyntax, hints);
 
       // Set values: valuesByMode takes precedence, value applies to ALL modes on create
       const valuesToSet: Record<string, any> = {};
@@ -296,6 +365,7 @@ async function createVariableSingle(p: any, collection: any) {
   if (p.description !== undefined) variable.description = p.description;
 
   const hints: Hint[] = [];
+  applyCodeSyntax(variable, p.codeSyntax, hints);
 
   // Set values: valuesByMode takes precedence, value applies to ALL modes on create
   const valuesToSet: Record<string, any> = {};
@@ -400,7 +470,7 @@ async function listVariablesFigma(params: any) {
   const items: any[] = [];
   for (const v of paged.items) {
     const full = await serializeVariable(v);
-    items.push(!fields?.length ? pickFields(full, ["valuesByMode", "scopes", "description"]) : pickFields(full, fields));
+    items.push(!fields?.length ? pickFields(full, ["valuesByMode", "scopes", "description", "codeSyntax"]) : pickFields(full, fields));
   }
   return { ...paged, items };
 }
@@ -414,6 +484,7 @@ async function updateVariableSingle(p: any, collection: any) {
   if (p.rename !== undefined) variable.name = p.rename;
   if (p.description !== undefined) variable.description = p.description;
   if (p.scopes !== undefined) applyScopes(variable, p.scopes, hints);
+  applyCodeSyntax(variable, p.codeSyntax, hints);
 
   // Set values: valuesByMode takes precedence, value is shorthand for default mode
   const valuesToSet: Record<string, any> = {};

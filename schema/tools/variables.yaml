@@ -11,6 +11,7 @@ notes: |
   // valuesByMode: values keyed by mode name. On create, value sets all modes; on update, value sets the default mode only.
   // Aliases in variable values use {type: "VARIABLE_ALIAS", name: "other/variable"}.
   // Paint[] VariableAlias uses {type:"VARIABLE_ALIAS", id:"<VariableID>"}; get IDs from variables.get/list or variable_collections.get. Prefer *VariableName helpers when available.
+  // codeSyntax maps platform names to code references for developer handoff, e.g. {WEB:"--color-bg", ANDROID:"color.bg", iOS:"Color.bg"}.
   // scopes: ALL_SCOPES, TEXT_CONTENT, WIDTH_HEIGHT, GAP, CORNER_RADIUS, ALL_FILLS, FRAME_FILL, SHAPE_FILL,
   //   TEXT_FILL, STROKE_COLOR, STROKE_FLOAT, EFFECT_FLOAT, EFFECT_COLOR, OPACITY, FONT_FAMILY, FONT_STYLE,
   //   FONT_WEIGHT, FONT_SIZE, LINE_HEIGHT, LETTER_SPACING, PARAGRAPH_SPACING, PARAGRAPH_INDENT
@@ -51,6 +52,14 @@ methods:
           valuesByMode: { type: object, optional: true, description: "Values keyed by mode name" }
           scopes: { type: "string[]", optional: true }
           description: { type: string, optional: true }
+          codeSyntax:
+            type: object
+            optional: true
+            description: "Platform code syntax values"
+            properties:
+              WEB: { type: string, optional: true }
+              ANDROID: { type: string, optional: true }
+              iOS: { type: string, optional: true }
 
   get:
     tier: read
@@ -86,6 +95,13 @@ methods:
         scopes:
           type: "string[]"
           description: "Where this variable can be applied"
+        codeSyntax:
+          type: object
+          description: "Platform code syntax values, e.g. {WEB:\"--color-bg\", ANDROID:\"color.bg\", iOS:\"Color.bg\"}"
+          properties:
+            WEB: { type: string, optional: true }
+            ANDROID: { type: string, optional: true }
+            iOS: { type: string, optional: true }
       required: [id, name, type, collectionId, valuesByMode]
 
   create:
@@ -116,6 +132,16 @@ methods:
               description: 'Values keyed by mode name (e.g. {"Light": "#FFF", "Dark": "#111"}). Takes precedence over value.'
             description: { type: string, optional: true, description: "Variable description" }
             scopes: { type: "string[]", coerce: json, optional: true, description: "Restrict where variable can be applied (default: ALL_SCOPES)" }
+            codeSyntax:
+              type: object
+              coerce: json
+              optional: true
+              passthrough: true
+              description: 'Platform code syntax values for developer handoff, e.g. {"WEB":"--color-bg", "ANDROID":"color.bg", "iOS":"Color.bg"}'
+              properties:
+                WEB: { type: string, optional: true }
+                ANDROID: { type: string, optional: true }
+                iOS: { type: string, optional: true }
     response:
       type: batch
       item:
@@ -150,6 +176,16 @@ methods:
               coerce: json
               optional: true
               description: 'Values keyed by mode name. Takes precedence over value.'
+            codeSyntax:
+              type: object
+              coerce: json
+              optional: true
+              passthrough: true
+              description: 'Update platform code syntax values, e.g. {"WEB":"--color-bg"}. Pass an empty string to clear a platform.'
+              properties:
+                WEB: { type: string, optional: true }
+                ANDROID: { type: string, optional: true }
+                iOS: { type: string, optional: true }
     response:
       type: batch_mixed
 
